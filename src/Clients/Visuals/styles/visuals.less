@@ -1644,6 +1644,55 @@ div.ql-toolbar {
     }
 }
 
+.percentileChart {
+    @percentileAxesColor: @neutralSecondaryAltColor;
+    @percentileLegendTextColor: @blackColor;
+
+    font-family: @regularFontFamily;
+
+    .axis, .legends {
+        path, line {
+            fill: none;
+            stroke: @percentileAxesColor;
+            shape-rendering: crispEdges;
+        }
+
+        text {
+            fill: @percentileAxesColor;
+            font-size: 11px;
+        }
+    }
+
+    .legends {
+        text {
+            font-size: 12px;
+            fill: @percentileLegendTextColor;
+            text-anchor: middle;
+        }
+    }
+
+    .tick {
+        line {
+            stroke-dasharray: 2 5;
+        }
+    }
+
+    .line {
+        fill: none;
+        stroke-width: 2px;
+    }
+
+    .point {
+        fill: none;
+        stroke: none;
+        pointer-events: all;
+    }
+
+    .point.show {
+        fill: @percentileAxesColor;
+    }
+}
+
 .areaRangeChart {
     @areaRangeChartAxesColor: @neutralSecondaryAltColor;
     @areaRangeChartLegendTextColor: @blackColor;

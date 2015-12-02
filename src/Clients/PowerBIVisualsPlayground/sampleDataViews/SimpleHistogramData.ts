@@ -38,7 +38,7 @@ module powerbi.visuals.sampleDataViews {
         public name: string = "SimpleHistogramData";
         public displayName: string = "Simple Histogram Data";
 
-        public visuals: string[] = ["histogram"];
+        public visuals: string[] = ["histogram", "percentileChart"];
 
         private minValue: number = 1;
         private maxValue: number = 120;
