@@ -344,4 +344,10 @@ module powerbi.visuals.plugins {
         capabilities: samples.AreaRangeChart.capabilities,
         create: () => new samples.AreaRangeChart()
     };
+
+    export var percentileChart: IVisualPlugin = {
+        name: 'percentileChart',
+        capabilities: PercentileChart.capabilities,
+        create: () => new PercentileChart()
+    };
 }

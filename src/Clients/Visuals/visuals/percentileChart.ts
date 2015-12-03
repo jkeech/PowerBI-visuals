@@ -62,27 +62,34 @@ module powerbi.visuals {
         * Fields, Formatting options, data reduction & QnA hints
         */
         public static capabilities: VisualCapabilities = {
-            dataRoles: [
-                {
-                    name: "Category",
-                    kind: VisualDataRoleKind.Grouping
-                },
-                {
-                    name: "Y",
-                    kind: VisualDataRoleKind.Measure
-                }
-            ],
+            dataRoles: [{
+                name: "Category",
+                kind: VisualDataRoleKind.Grouping,
+                displayName: data.createDisplayNameGetter("Role_DisplayName_Category")
+            }, {
+                name: "Values",
+                kind: VisualDataRoleKind.Measure,
+                displayName: data.createDisplayNameGetter("Role_DisplayName_Values")
+            }],
             dataViewMappings: [{
-                conditions: [
-                    { 'Category': { max: 1 }, 'Y': { max: 1 } },
-                ],
+                conditions: [{
+                    "Category": {
+                        min: 1,
+                        max: 1
+                    },
+                    "Values": {
+                        min: 0,
+                        max: 1
+                    }
+                }],
                 categorical: {
                     categories: {
-                        for: { in: 'Category' },
-                        dataReductionAlgorithm: { top: {} }
+                        bind: {
+                            to: "Category"
+                        }
                     },
                     values: {
-                        select: [{ bind: { to: 'Y' } }]
+                        for: { in: "Values" }
                     }
                 }
             }],
@@ -178,7 +185,7 @@ module powerbi.visuals {
 
         private static DefaultSettings: PercentileChartSettings = {
             fillColor: 'teal',
-            precision: 0,
+            precision: 2,
             xAxisTitle: ''
         };
 
@@ -304,7 +311,14 @@ module powerbi.visuals {
             Debug.assert(PercentileChart.percentileRange != null, "percentileRange should not be null.");
             Debug.assert(PercentileChart.percentileRange.length === 100, "percentileRange should have 100 values, so that 100 quartiles are computed.");
 
-            let values: number[] = dataView.categorical.categories[0].values;
+            let frequencies: number[] = [];
+            if (dataView.categorical.values &&
+                dataView.categorical.values[0] &&
+                dataView.categorical.values[0].values) {
+                frequencies = dataView.categorical.values[0].values;
+            }
+
+            let values: any[] = this.getValuesByFrequencies(dataView.categorical.categories[0].values, frequencies);
 
             // d3.scale.quantile().quantiles() returns an array of N-1 values. In this case,
             // it will return percentiles 1-99.
@@ -312,12 +326,18 @@ module powerbi.visuals {
             // and the 1st percentile.
             // The 100th percentile is everything between the 99th percentile and the
             // maximum value in the dataset.
-            let min: number = d3.min(values);
-            let max: number = d3.max(values);
-            let percentiles: number[] = d3.scale.quantile()
+            let extent: any[] = d3.extent(values);
+            let min: any = extent[0];
+            let max: any = extent[1];
+            let percentiles: any[] = d3.scale.quantile()
                 .domain(values)
                 .range(PercentileChart.percentileRange)
                 .quantiles();
+
+            if (min instanceof Date && max instanceof Date) {
+                percentiles = percentiles.map(x => new Date(x));
+            }
+
             percentiles.unshift(min);
             percentiles.push(max);
 
@@ -334,7 +354,9 @@ module powerbi.visuals {
             let settings: PercentileChartSettings = this.parseSettings(dataView);
             let formatter: IValueFormatter = ValueFormatter.create({
                 format: ValueFormatter.getFormatString(dataView.categorical.categories[0].source, PercentileChart.Properties.general.formatString),
-                value: values[0],
+                value: min,
+                value2: max,
+                tickCount: 10,
                 precision: settings.precision
             });
 
@@ -343,6 +365,25 @@ module powerbi.visuals {
                 settings: settings,
                 formatter: formatter
             };
+        }
+
+        private getValuesByFrequencies(values: any[], frequencies: number[]): number[] {
+            var filteredValues: any[] = [];
+
+            values.forEach((item: any, index: number) => {
+                if (frequencies &&
+                    frequencies[index] &&
+                    !isNaN(frequencies[index]) &&
+                    frequencies[index] > 1) {
+                    for (var i = 0; i < frequencies[index]; i++) {
+                        filteredValues.push(item);
+                    }
+                } else {
+                    filteredValues.push(item);
+                }
+            });
+
+            return filteredValues;
         }
 
         private parseSettings(dataView: DataView): PercentileChartSettings {
@@ -373,7 +414,7 @@ module powerbi.visuals {
                 PercentileChart.Properties.labels.labelPrecision,
                 PercentileChart.DefaultSettings.precision);
 
-            if (precision <= PercentileChart.MinPrecision) {
+            if (precision < PercentileChart.MinPrecision) {
                 return PercentileChart.MinPrecision;
             }
 
@@ -398,15 +439,27 @@ module powerbi.visuals {
             let effectiveHeight: number = viewport.height - this.margin.top - this.margin.bottom - this.LegendSize;
             let animateDuration: number = animate ? 250 : 0;
 
-            // Set up the domain to align with the ticks so it looks nicer.
-            let domainMin: number = Math.round(model.percentiles[0].value / 10.0 - 0.499999) * 10;
-            let domainMax: number = Math.round(model.percentiles[100].value / 10.0 + 0.499999) * 10;
-
-            let x: D3.Scale.LinearScale = d3.scale.linear()
-                .domain([domainMin, domainMax])
-                .range([0, effectiveWidth]);
-
             // Draw the axes
+            let domainMin: number = model.percentiles[0].value;
+            let domainMax: number = model.percentiles[100].value;
+
+            let x: any;
+
+            if (typeof domainMin === "number" && typeof domainMax === "number") {
+                // Set up the domain to align with the ticks so it looks nicer if the type is numeric.
+                domainMin = Math.round(domainMin / 10.0 - 0.499999) * 10;
+                domainMax = Math.round(domainMax / 10.0 + 0.499999) * 10;
+
+                x = d3.scale.linear()
+                    .domain([domainMin, domainMax])
+                    .range([0, effectiveWidth]);
+            }
+            else {
+                x = d3.time.scale()
+                    .domain([domainMin, domainMax])
+                    .range([0, effectiveWidth]);
+            }
+
             let y: D3.Scale.LinearScale = d3.scale.linear()
                 .domain([0, 100])
                 .range([effectiveHeight, 0]);
@@ -414,7 +467,6 @@ module powerbi.visuals {
             let xAxis: D3.Svg.Axis = d3.svg.axis()
                 .scale(x)
                 .orient('bottom')
-                .ticks(10)
                 .tickSize(-effectiveHeight)
                 .tickFormat(v => model.formatter.format(v));
 
@@ -441,7 +493,7 @@ module powerbi.visuals {
 
             lineSelection.enter().append('path');
             lineSelection
-                .attr('stroke', (d, i) => this.colors.getColorByIndex(i).value)
+                .attr('stroke', (d, i) => model.settings.fillColor)
                 .transition()
                 .duration(animateDuration)
                 .attr('d', line);
@@ -451,19 +503,19 @@ module powerbi.visuals {
             let pointSelection: D3.UpdateSelection = this.line.selectAll('circle')
                 .data(model.percentiles);
 
-            var newPoints: D3.Selection = pointSelection.enter()
+            pointSelection.enter()
                 .append('circle')
                 .attr('r', 5)
                 .classed('point', true)
                 .on('mouseover.point', this.showDataPoint)
                 .on('mouseout.point', this.hideDataPoint);
-            pointSelection
+            let points: D3.Selection = pointSelection
                 .attr('cx', (d: Percentile) => x(d.value))
                 .attr('cy', (d: Percentile) => y(d.percentile));
             pointSelection.exit().remove();
 
-            for (let i = 0; i < newPoints[0].length; i++) {
-                this.addTooltip(model, newPoints[0][i]);
+            for (let i = 0; i < points[0].length; i++) {
+                this.addTooltip(model, points[0][i]);
             }
         }
 
@@ -532,12 +584,4 @@ module powerbi.visuals {
                 .remove();
         }
     }
-}
-
-module powerbi.visuals.plugins {
-    export var percentileChart: IVisualPlugin = {
-        name: 'percentileChart',
-        capabilities: PercentileChart.capabilities,
-        create: () => new PercentileChart()
-    };
 }
