@@ -311,14 +311,17 @@ module powerbi.visuals {
             Debug.assert(PercentileChart.percentileRange != null, "percentileRange should not be null.");
             Debug.assert(PercentileChart.percentileRange.length === 100, "percentileRange should have 100 values, so that 100 quartiles are computed.");
 
-            let frequencies: number[] = [];
+            let values: number[] = [];
+            let usedValues: boolean = false;
             if (dataView.categorical.values &&
                 dataView.categorical.values[0] &&
                 dataView.categorical.values[0].values) {
-                frequencies = dataView.categorical.values[0].values;
+                values = dataView.categorical.values[0].values;
+                usedValues = true;
             }
-
-            let values: any[] = this.getValuesByFrequencies(dataView.categorical.categories[0].values, frequencies);
+            else {
+                values = dataView.categorical.categories[0].values;
+            }
 
             // d3.scale.quantile().quantiles() returns an array of N-1 values. In this case,
             // it will return percentiles 1-99.
@@ -326,17 +329,13 @@ module powerbi.visuals {
             // and the 1st percentile.
             // The 100th percentile is everything between the 99th percentile and the
             // maximum value in the dataset.
-            let extent: any[] = d3.extent(values);
-            let min: any = extent[0];
-            let max: any = extent[1];
-            let percentiles: any[] = d3.scale.quantile()
+            let extent: number[] = d3.extent(values);
+            let min: number = extent[0];
+            let max: number = extent[1];
+            let percentiles: number[] = d3.scale.quantile()
                 .domain(values)
                 .range(PercentileChart.percentileRange)
                 .quantiles();
-
-            if (min instanceof Date && max instanceof Date) {
-                percentiles = percentiles.map(x => new Date(x));
-            }
 
             percentiles.unshift(min);
             percentiles.push(max);
@@ -351,7 +350,7 @@ module powerbi.visuals {
                 });
             }
 
-            let settings: PercentileChartSettings = this.parseSettings(dataView);
+            let settings: PercentileChartSettings = this.parseSettings(dataView, usedValues);
             let formatter: IValueFormatter = ValueFormatter.create({
                 format: ValueFormatter.getFormatString(dataView.categorical.categories[0].source, PercentileChart.Properties.general.formatString),
                 value: min,
@@ -367,26 +366,7 @@ module powerbi.visuals {
             };
         }
 
-        private getValuesByFrequencies(values: any[], frequencies: number[]): number[] {
-            var filteredValues: any[] = [];
-
-            values.forEach((item: any, index: number) => {
-                if (frequencies &&
-                    frequencies[index] &&
-                    !isNaN(frequencies[index]) &&
-                    frequencies[index] > 1) {
-                    for (var i = 0; i < frequencies[index]; i++) {
-                        filteredValues.push(item);
-                    }
-                } else {
-                    filteredValues.push(item);
-                }
-            });
-
-            return filteredValues;
-        }
-
-        private parseSettings(dataView: DataView): PercentileChartSettings {
+        private parseSettings(dataView: DataView, usedValues: boolean): PercentileChartSettings {
             if (!dataView ||
                 !dataView.metadata ||
                 !dataView.metadata.columns ||
@@ -396,10 +376,24 @@ module powerbi.visuals {
 
             let objects: DataViewObjects = dataView.metadata.objects;
             let colorHelper: ColorHelper = new ColorHelper(this.colors, PercentileChart.Properties.dataPoint.fill, PercentileChart.DefaultSettings.fillColor);
+            let xAxisTitle: string = PercentileChart.DefaultSettings.xAxisTitle;
+
+            if (usedValues) {
+                if (dataView.metadata.columns.length > 1 &&
+                    dataView.metadata.columns[0].displayName &&
+                    dataView.metadata.columns[1].displayName) {
+                    xAxisTitle = dataView.metadata.columns[1].displayName + ' per ' + dataView.metadata.columns[0].displayName;
+                }
+            }
+            else {
+                if (dataView.metadata.columns[0].displayName) {
+                    xAxisTitle = dataView.metadata.columns[0].displayName;
+                }
+            }
 
             return {
                 precision: PercentileChart.getPrecision(objects),
-                xAxisTitle: dataView.metadata.columns[0].displayName || PercentileChart.DefaultSettings.xAxisTitle,
+                xAxisTitle: xAxisTitle,
                 fillColor: colorHelper.getColorForMeasure(objects, '')
             };
         }
