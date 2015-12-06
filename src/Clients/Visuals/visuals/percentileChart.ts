@@ -431,8 +431,8 @@ module powerbi.visuals {
 
         private resize(viewport: IViewport): void {
             this.root.attr({
-                'height': viewport.height,
-                'width': viewport.width
+                'height': Math.max(0, viewport.height),
+                'width': Math.max(0, viewport.width)
             });
 
             this.main.attr('transform', SVGUtil.translate(this.margin.left, this.margin.top));
@@ -447,8 +447,8 @@ module powerbi.visuals {
             this.renderLegends(model, viewport);
 
             if (model && model.percentiles) {
-                let effectiveWidth: number = viewport.width - this.margin.left - this.margin.right - this.LegendSize - this.AxisSize;
-                let effectiveHeight: number = viewport.height - this.margin.top - this.margin.bottom - this.LegendSize;
+                let effectiveWidth: number = Math.max(0, viewport.width - this.margin.left - this.margin.right - this.LegendSize - this.AxisSize);
+                let effectiveHeight: number = Math.max(0, viewport.height - this.margin.top - this.margin.bottom - this.LegendSize);
                 let animateDuration: number = animate ? 250 : 0;
 
                 // Draw the axes
