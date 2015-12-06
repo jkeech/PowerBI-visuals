@@ -311,7 +311,7 @@ module powerbi.visuals {
             Debug.assert(PercentileChart.percentileRange != null, "percentileRange should not be null.");
             Debug.assert(PercentileChart.percentileRange.length === 100, "percentileRange should have 100 values, so that 100 quartiles are computed.");
 
-            let values: number[] = [];
+            let values: any[] = [];
             let usedValues: boolean = false;
             if (dataView.categorical.values &&
                 dataView.categorical.values[0] &&
@@ -321,6 +321,14 @@ module powerbi.visuals {
             }
             else {
                 values = dataView.categorical.categories[0].values;
+            }
+
+            if (!this.validateValues(values)) {
+                return {
+                    percentiles: null,
+                    settings: null,
+                    formatter: null
+                };
             }
 
             // d3.scale.quantile().quantiles() returns an array of N-1 values. In this case,
@@ -364,6 +372,12 @@ module powerbi.visuals {
                 settings: settings,
                 formatter: formatter
             };
+        }
+
+        private validateValues(values: any[]): boolean {
+            // Ensure that all values are numerical, since computing percentiles
+            // only makes sense for numerical values.
+            return _.all(values, (x) => typeof x === 'number' && isFinite(x));
         }
 
         private parseSettings(dataView: DataView, usedValues: boolean): PercentileChartSettings {
@@ -429,87 +443,89 @@ module powerbi.visuals {
         }
 
         private draw(model: PercentileChartViewModel, viewport: IViewport, animate: boolean): void {
-            let effectiveWidth: number = viewport.width - this.margin.left - this.margin.right - this.LegendSize - this.AxisSize;
-            let effectiveHeight: number = viewport.height - this.margin.top - this.margin.bottom - this.LegendSize;
-            let animateDuration: number = animate ? 250 : 0;
-
-            // Draw the axes
-            let domainMin: number = model.percentiles[0].value;
-            let domainMax: number = model.percentiles[100].value;
-
-            let x: any;
-
-            if (typeof domainMin === "number" && typeof domainMax === "number") {
-                // Set up the domain to align with the ticks so it looks nicer if the type is numeric.
-                domainMin = Math.round(domainMin / 10.0 - 0.499999) * 10;
-                domainMax = Math.round(domainMax / 10.0 + 0.499999) * 10;
-
-                x = d3.scale.linear()
-                    .domain([domainMin, domainMax])
-                    .range([0, effectiveWidth]);
-            }
-            else {
-                x = d3.time.scale()
-                    .domain([domainMin, domainMax])
-                    .range([0, effectiveWidth]);
-            }
-
-            let y: D3.Scale.LinearScale = d3.scale.linear()
-                .domain([0, 100])
-                .range([effectiveHeight, 0]);
-
-            let xAxis: D3.Svg.Axis = d3.svg.axis()
-                .scale(x)
-                .orient('bottom')
-                .tickSize(-effectiveHeight)
-                .tickFormat(v => model.formatter.format(v));
-
-            let yAxis: D3.Svg.Axis = d3.svg.axis()
-                .scale(y)
-                .orient('left')
-                .ticks(5)
-                .tickSize(-effectiveWidth);
-
-            this.axisX.call(xAxis);
-            this.axisY.call(yAxis);
-
             // Draw the legend text for both axes
-            this.renderLegends(viewport);
+            this.renderLegends(model, viewport);
 
-            // Draw the percentile line
-            let line: D3.Svg.Line = d3.svg.line()
-                .x((d: Percentile) => x(d.value))
-                .y((d: Percentile) => y(d.percentile))
-                .interpolate("basis");
+            if (model && model.percentiles) {
+                let effectiveWidth: number = viewport.width - this.margin.left - this.margin.right - this.LegendSize - this.AxisSize;
+                let effectiveHeight: number = viewport.height - this.margin.top - this.margin.bottom - this.LegendSize;
+                let animateDuration: number = animate ? 250 : 0;
 
-            let lineSelection: D3.UpdateSelection = this.line.selectAll('path')
-                .data([model.percentiles]);
+                // Draw the axes
+                let domainMin: number = model.percentiles[0].value;
+                let domainMax: number = model.percentiles[100].value;
 
-            lineSelection.enter().append('path');
-            lineSelection
-                .attr('stroke', (d, i) => model.settings.fillColor)
-                .transition()
-                .duration(animateDuration)
-                .attr('d', line);
-            lineSelection.exit().remove();
+                let x: any;
 
-            // Draw the individual data points that will be shown on hover with a tooltip
-            let pointSelection: D3.UpdateSelection = this.line.selectAll('circle')
-                .data(model.percentiles);
+                if (typeof domainMin === "number" && typeof domainMax === "number") {
+                    // Set up the domain to align with the ticks so it looks nicer if the type is numeric.
+                    domainMin = Math.round(domainMin / 10.0 - 0.499999) * 10;
+                    domainMax = Math.round(domainMax / 10.0 + 0.499999) * 10;
 
-            pointSelection.enter()
-                .append('circle')
-                .attr('r', 5)
-                .classed('point', true)
-                .on('mouseover.point', this.showDataPoint)
-                .on('mouseout.point', this.hideDataPoint);
-            let points: D3.Selection = pointSelection
-                .attr('cx', (d: Percentile) => x(d.value))
-                .attr('cy', (d: Percentile) => y(d.percentile));
-            pointSelection.exit().remove();
+                    x = d3.scale.linear()
+                        .domain([domainMin, domainMax])
+                        .range([0, effectiveWidth]);
+                }
+                else {
+                    x = d3.time.scale()
+                        .domain([domainMin, domainMax])
+                        .range([0, effectiveWidth]);
+                }
 
-            for (let i = 0; i < points[0].length; i++) {
-                this.addTooltip(model, points[0][i]);
+                let y: D3.Scale.LinearScale = d3.scale.linear()
+                    .domain([0, 100])
+                    .range([effectiveHeight, 0]);
+
+                let xAxis: D3.Svg.Axis = d3.svg.axis()
+                    .scale(x)
+                    .orient('bottom')
+                    .tickSize(-effectiveHeight)
+                    .tickFormat(v => model.formatter.format(v));
+
+                let yAxis: D3.Svg.Axis = d3.svg.axis()
+                    .scale(y)
+                    .orient('left')
+                    .ticks(5)
+                    .tickSize(-effectiveWidth);
+
+                this.axisX.call(xAxis);
+                this.axisY.call(yAxis);
+
+                // Draw the percentile line
+                let line: D3.Svg.Line = d3.svg.line()
+                    .x((d: Percentile) => x(d.value))
+                    .y((d: Percentile) => y(d.percentile))
+                    .interpolate("basis");
+
+                let lineSelection: D3.UpdateSelection = this.line.selectAll('path')
+                    .data([model.percentiles]);
+
+                lineSelection.enter().append('path');
+                lineSelection
+                    .attr('stroke', (d, i) => model.settings.fillColor)
+                    .transition()
+                    .duration(animateDuration)
+                    .attr('d', line);
+                lineSelection.exit().remove();
+
+                // Draw the individual data points that will be shown on hover with a tooltip
+                let pointSelection: D3.UpdateSelection = this.line.selectAll('circle')
+                    .data(model.percentiles);
+
+                pointSelection.enter()
+                    .append('circle')
+                    .attr('r', 5)
+                    .classed('point', true)
+                    .on('mouseover.point', this.showDataPoint)
+                    .on('mouseout.point', this.hideDataPoint);
+                let points: D3.Selection = pointSelection
+                    .attr('cx', (d: Percentile) => x(d.value))
+                    .attr('cy', (d: Percentile) => y(d.percentile));
+                pointSelection.exit().remove();
+
+                for (let i = 0; i < points[0].length; i++) {
+                    this.addTooltip(model, points[0][i]);
+                }
             }
         }
 
@@ -535,13 +551,15 @@ module powerbi.visuals {
             });
         }
 
-        private renderLegends(viewport: IViewport): void {
+        private renderLegends(model: PercentileChartViewModel, viewport: IViewport): void {
+            let xAxisTitle: string = model.percentiles ? model.settings.xAxisTitle : "Invalid data: Use numeric values";
+             
             let datalegends: Legend[] = [
                 {
                     transform: SVGUtil.translate(
                         (viewport.width - this.margin.left - this.margin.right) / 2,
                         (viewport.height - this.margin.top - this.margin.bottom)),
-                    text: this.model.settings.xAxisTitle,
+                    text: xAxisTitle,
                     dx: "1em",
                     dy: "-1em"
                 }, {
