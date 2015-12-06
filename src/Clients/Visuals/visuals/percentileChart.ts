@@ -30,14 +30,13 @@
 module powerbi.visuals {
     import Debug = debug;
     import ClassAndSelector = jsCommon.CssConstants.ClassAndSelector;
-    import ValueFormatter = valueFormatter;
 
     export interface Percentile {
         percentile: number;
         value: number;
     }
 
-    interface Legend {
+    export interface Legend {
         text: string;
         transform?: string;
         dx?: string;
@@ -47,7 +46,9 @@ module powerbi.visuals {
     export interface PercentileChartViewModel {
         percentiles: Percentile[];
         settings: PercentileChartSettings;
-        formatter: IValueFormatter;
+        xAxis: IAxisProperties;
+        yAxis: IAxisProperties;
+        legends: Legend[];
     };
 
     export interface PercentileChartSettings {
@@ -242,15 +243,15 @@ module powerbi.visuals {
                 return;
             }
 
-            let model: PercentileChartViewModel = this.model = this.converter(options.dataViews[0]);
+            let viewport: IViewport = options.viewport;
+
+            let model: PercentileChartViewModel = this.model = this.converter(options.dataViews[0], viewport);
             if (!model) {
                 return;
             }
 
-            let viewport: IViewport = options.viewport;
-
             this.resize(viewport);
-            this.draw(model, viewport, !options.suppressAnimations);
+            this.draw(model, !options.suppressAnimations);
         }
 
         /*About to remove your visual, do clean up here */ 
@@ -299,7 +300,7 @@ module powerbi.visuals {
         }
 
         // Convert a DataView into a view model
-        private converter(dataView: DataView): PercentileChartViewModel {
+        private converter(dataView: DataView, viewport: IViewport): PercentileChartViewModel {
             if (!dataView.categorical ||
                 !dataView.categorical.categories ||
                 !dataView.categorical.categories[0] ||
@@ -312,14 +313,17 @@ module powerbi.visuals {
             Debug.assert(PercentileChart.percentileRange.length === 100, "percentileRange should have 100 values, so that 100 quartiles are computed.");
 
             let values: any[] = [];
+            let metadataColumn: DataViewMetadataColumn;
             let usedValues: boolean = false;
             if (dataView.categorical.values &&
                 dataView.categorical.values[0] &&
                 dataView.categorical.values[0].values) {
+                metadataColumn = dataView.categorical.values[0].source;
                 values = dataView.categorical.values[0].values;
                 usedValues = true;
             }
             else {
+                metadataColumn = dataView.categorical.categories[0].source;
                 values = dataView.categorical.categories[0].values;
             }
 
@@ -327,7 +331,9 @@ module powerbi.visuals {
                 return {
                     percentiles: null,
                     settings: null,
-                    formatter: null
+                    xAxis: null,
+                    yAxis: null,
+                    legends: this.generateLegends(viewport, "Invalid data: Use numeric values")
                 };
             }
 
@@ -359,18 +365,45 @@ module powerbi.visuals {
             }
 
             let settings: PercentileChartSettings = this.parseSettings(dataView, usedValues);
-            let formatter: IValueFormatter = ValueFormatter.create({
-                format: ValueFormatter.getFormatString(dataView.categorical.categories[0].source, PercentileChart.Properties.general.formatString),
-                value: min,
-                value2: max,
-                tickCount: 10,
-                precision: settings.precision
+            let effectiveWidth: number = Math.max(0, viewport.width - this.margin.left - this.margin.right - this.LegendSize - this.AxisSize);
+            let effectiveHeight: number = Math.max(0, viewport.height - this.margin.top - this.margin.bottom - this.LegendSize);
+
+            let xAxis = AxisHelper.createAxis({
+                pixelSpan: effectiveWidth,
+                dataDomain: [min, max],
+                metaDataColumn: metadataColumn,
+                formatStringProp: PercentileChart.Properties.general.formatString,
+                outerPadding: 0,
+                isCategoryAxis: false,
+                isScalar: true,
+                isVertical: false,
+                useTickIntervalForDisplayUnits: true,
+                axisPrecision: settings.precision
             });
+
+            let yAxis = AxisHelper.createAxis({
+                pixelSpan: effectiveHeight,
+                dataDomain: [0, 100],
+                metaDataColumn: null,
+                formatStringProp: null,
+                outerPadding: 0,
+                isCategoryAxis: false,
+                isScalar: true,
+                isVertical: true,
+                useTickIntervalForDisplayUnits: true
+            });
+
+            // Show gridlines on the chart to make the values more readable.
+            // TODO: Make this a configuration setting that can be toggled.
+            xAxis.axis = xAxis.axis.tickSize(-effectiveHeight);
+            yAxis.axis = yAxis.axis.tickSize(-effectiveWidth);
 
             return {
                 percentiles: result,
                 settings: settings,
-                formatter: formatter
+                xAxis: xAxis,
+                yAxis: yAxis,
+                legends: this.generateLegends(viewport, settings.xAxisTitle)
             };
         }
 
@@ -429,6 +462,28 @@ module powerbi.visuals {
             return precision;
         }
 
+        private generateLegends(viewport: IViewport, xAxisTitle: string): Legend[] {
+            return [
+                {
+                    transform: SVGUtil.translate(
+                        (viewport.width - this.margin.left - this.margin.right) / 2,
+                        (viewport.height - this.margin.top - this.margin.bottom)),
+                    text: xAxisTitle,
+                    dx: "1em",
+                    dy: "-1em"
+                }, {
+                    transform: SVGUtil.translateAndRotate(
+                        0,
+                        (viewport.height - this.margin.top - this.margin.bottom) / 2,
+                        0,
+                        0,
+                        270),
+                    text: PercentileChart.yAxisTitle,
+                    dx: "3em"
+                }
+            ];
+        }
+
         private resize(viewport: IViewport): void {
             this.root.attr({
                 'height': Math.max(0, viewport.height),
@@ -442,59 +497,20 @@ module powerbi.visuals {
             this.axisX.attr('transform', SVGUtil.translate(0, viewport.height - this.margin.top - this.margin.bottom - this.LegendSize));
         }
 
-        private draw(model: PercentileChartViewModel, viewport: IViewport, animate: boolean): void {
+        private draw(model: PercentileChartViewModel, animate: boolean): void {
             // Draw the legend text for both axes
-            this.renderLegends(model, viewport);
+            this.renderLegends(model);
 
             if (model && model.percentiles) {
-                let effectiveWidth: number = Math.max(0, viewport.width - this.margin.left - this.margin.right - this.LegendSize - this.AxisSize);
-                let effectiveHeight: number = Math.max(0, viewport.height - this.margin.top - this.margin.bottom - this.LegendSize);
                 let animateDuration: number = animate ? 250 : 0;
 
-                // Draw the axes
-                let domainMin: number = model.percentiles[0].value;
-                let domainMax: number = model.percentiles[100].value;
-
-                let x: any;
-
-                if (typeof domainMin === "number" && typeof domainMax === "number") {
-                    // Set up the domain to align with the ticks so it looks nicer if the type is numeric.
-                    domainMin = Math.round(domainMin / 10.0 - 0.499999) * 10;
-                    domainMax = Math.round(domainMax / 10.0 + 0.499999) * 10;
-
-                    x = d3.scale.linear()
-                        .domain([domainMin, domainMax])
-                        .range([0, effectiveWidth]);
-                }
-                else {
-                    x = d3.time.scale()
-                        .domain([domainMin, domainMax])
-                        .range([0, effectiveWidth]);
-                }
-
-                let y: D3.Scale.LinearScale = d3.scale.linear()
-                    .domain([0, 100])
-                    .range([effectiveHeight, 0]);
-
-                let xAxis: D3.Svg.Axis = d3.svg.axis()
-                    .scale(x)
-                    .orient('bottom')
-                    .tickSize(-effectiveHeight)
-                    .tickFormat(v => model.formatter.format(v));
-
-                let yAxis: D3.Svg.Axis = d3.svg.axis()
-                    .scale(y)
-                    .orient('left')
-                    .ticks(5)
-                    .tickSize(-effectiveWidth);
-
-                this.axisX.call(xAxis);
-                this.axisY.call(yAxis);
+                this.axisX.call(model.xAxis.axis);
+                this.axisY.call(model.yAxis.axis);
 
                 // Draw the percentile line
                 let line: D3.Svg.Line = d3.svg.line()
-                    .x((d: Percentile) => x(d.value))
-                    .y((d: Percentile) => y(d.percentile))
+                    .x((d: Percentile) => model.xAxis.scale(d.value))
+                    .y((d: Percentile) => model.yAxis.scale(d.percentile))
                     .interpolate("basis");
 
                 let lineSelection: D3.UpdateSelection = this.line.selectAll('path')
@@ -519,8 +535,8 @@ module powerbi.visuals {
                     .on('mouseover.point', this.showDataPoint)
                     .on('mouseout.point', this.hideDataPoint);
                 let points: D3.Selection = pointSelection
-                    .attr('cx', (d: Percentile) => x(d.value))
-                    .attr('cy', (d: Percentile) => y(d.percentile));
+                    .attr('cx', (d: Percentile) => model.xAxis.scale(d.value))
+                    .attr('cy', (d: Percentile) => model.yAxis.scale(d.percentile));
                 pointSelection.exit().remove();
 
                 for (let i = 0; i < points[0].length; i++) {
@@ -546,37 +562,15 @@ module powerbi.visuals {
                     value: data.percentile.toString()
                 }, {
                     displayName: "Value",
-                    value: model.formatter.format(data.value)
+                    value: model.xAxis.formatter.format(data.value)
                 }];
             });
         }
 
-        private renderLegends(model: PercentileChartViewModel, viewport: IViewport): void {
-            let xAxisTitle: string = model.percentiles ? model.settings.xAxisTitle : "Invalid data: Use numeric values";
-             
-            let datalegends: Legend[] = [
-                {
-                    transform: SVGUtil.translate(
-                        (viewport.width - this.margin.left - this.margin.right) / 2,
-                        (viewport.height - this.margin.top - this.margin.bottom)),
-                    text: xAxisTitle,
-                    dx: "1em",
-                    dy: "-1em"
-                }, {
-                    transform: SVGUtil.translateAndRotate(
-                        0,
-                        (viewport.height - this.margin.top - this.margin.bottom) / 2,
-                        0,
-                        0,
-                        270),
-                    text: PercentileChart.yAxisTitle,
-                    dx: "3em"
-                }
-            ];
-
+        private renderLegends(model: PercentileChartViewModel): void {
             let legendSelection: D3.UpdateSelection = this.legends
                 .selectAll(PercentileChart.Legend.selector)
-                .data(datalegends);
+                .data(model.legends);
 
             legendSelection
                 .enter()
